@@ -1,3 +1,4 @@
+# coding=utf-8
 """
 hammer.py: Convert Colander schemas into JSON Schema documents.
 """
@@ -23,6 +24,7 @@ class BaseAdapter(object):
     """
     Base class for JSON schema adapters.
     """
+
     def __init__(self, schema, *args, **kwargs):
         self.schema = schema
         super(BaseAdapter, self).__init__(*args, **kwargs)
@@ -77,6 +79,7 @@ class MappingAdapter(BaseAdapter):
     """
     Convert a :class:`colander.MappingSchema` into a JSON object property.
     """
+
     def to_json_schema(self):
         json_property = {
             'type': 'object',
@@ -94,6 +97,7 @@ class SequenceAdapter(BaseAdapter):
     """
     Convert a :class:`colander.Sequence` into a JSON array property.
     """
+
     def to_json_schema(self):
         return {
             'type': 'array',
@@ -105,6 +109,7 @@ class SetAdapter(BaseAdapter):
     """
     Convert a :class:`colander.Set` into a JSON array property of unique items.
     """
+
     def to_json_schema(self):
         return {
             'type': 'array',
@@ -116,6 +121,7 @@ class TupleAdapter(BaseAdapter):
     """
     Convert a :class:`colander.Tuple` into a fixed-length JSON array property.
     """
+
     def to_json_schema(self):
         length = len(self.schema.children)
         json_property = {
@@ -136,10 +142,27 @@ class DatetimeAdapter(BaseAdapter):
     Convert various Colander datetime types into a "string" type with a
     "datetime" format string.
     """
+
     def to_json_schema(self):
         return {
             'type': 'string',
             'format': 'date-time'
+        }
+
+
+class FloatAdapter(BaseAdapter):
+    """
+    Convert a numeric ScheamType into a "float."
+
+    There is no actual "float" type in the JSON schema spec, so we have to
+    add a constraint that the number cannot be a multiple of 1.
+    """
+    def to_json_schema(self):
+        return {
+            'type': 'number',
+            'not': {
+                'multipleOf': 1
+            }
         }
 
 
@@ -170,7 +193,7 @@ def convert_range(_range):
     }
 
     if not _range.max is None:
-        fields['max']  = _range.max
+        fields['max'] = _range.max
 
     return fields
 
@@ -182,6 +205,24 @@ def convert_length(length):
     return {
         'minLength': length.min,
         'maxLength': length.max
+    }
+
+
+def convert_one_of(one_of):
+    """
+    Convert a :class:`colander.OneOf` into an "enum" field.
+    """
+    return {
+        'enum': one_of.choices
+    }
+
+
+def convert_url(url):
+    """
+    Convert a :class:`colander.url` into a "uri" field.
+    """
+    return {
+        'format': 'uri'
     }
 
 
@@ -198,8 +239,8 @@ _adapters = {
     colander.Time: DatetimeAdapter,
 
     # Numeric types that may require special formatting.
-    colander.Decimal: 'number',
-    colander.Money: 'number',
+    colander.Decimal: FloatAdapter,
+    colander.Money: FloatAdapter,
 
     # Schemas (container types)
     colander.Schema: MappingAdapter,
@@ -209,10 +250,11 @@ _adapters = {
     colander.Tuple: TupleAdapter,
 
     # Validators
-    colander.Regex: convert_regex,
+    colander.Regex: convert_regex,  # also handles 'url'
     colander.Email: convert_email,
     colander.Range: convert_range,
-    colander.Length: convert_length
+    colander.Length: convert_length,
+    colander.OneOf: convert_one_of
 }
 
 

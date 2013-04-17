@@ -198,18 +198,79 @@ class TestRangeAdapter(HammerTestCase):
         self.validate_schema(json_schema)
 
 
-class TestLengthdapter(HammerTestCase):
+class TestLengthAdapter(HammerTestCase):
     def test_length_converts_to_minlength_and_maxlength_fields(self):
         class LengthSchema(colander.Schema):
-            constrained_number = colander.SchemaNode(
+            constrained_text = colander.SchemaNode(
                 colander.String(), validator=colander.Length(min=1, max=5))
 
         schema = LengthSchema()
         json_schema = hammer.to_json_schema(schema)
-        field = json_schema['properties']['constrained_number']
+        field = json_schema['properties']['constrained_text']
 
         self.assertEqual(field['type'], 'string')
         self.assertEqual(field['minLength'], 1)
         self.assertEqual(field['maxLength'], 5)
+
+        self.validate_schema(json_schema)
+
+
+class TestOneOfAdapter(HammerTestCase):
+    def test_oneOf_converts_to_enum_field(self):
+        class OneOfSchema(colander.Schema):
+            constrained_number = colander.SchemaNode(
+                colander.Int(), validator=colander.OneOf(choices=[1, 2, 3]))
+
+        schema = OneOfSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['constrained_number']
+
+        self.assertEqual(field['type'], 'number')
+        self.assertEqual(field['enum'], [1, 2, 3])
+
+        self.validate_schema(json_schema)
+
+
+class TestUrlAdapter(HammerTestCase):
+    def test_url_converts_to_pattern(self):
+        class UrlSchema(colander.Schema):
+            constrained_text = colander.SchemaNode(
+                colander.String(), validator=colander.url)
+
+        schema = UrlSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['constrained_text']
+
+        self.assertEqual(field['type'], 'string')
+        self.assertEqual(field['pattern'],
+                         schema.children[0].validator.match_object.pattern)
+
+        self.validate_schema(json_schema)
+
+
+class TestFloatAdapter(HammerTestCase):
+    def test_money_converts_to_float(self):
+        class MoneySchema(colander.Schema):
+            money = colander.SchemaNode(colander.Money())
+
+        schema = MoneySchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['money']
+
+        self.assertEqual(field['type'], 'number')
+        self.assertEqual(field['not']['multipleOf'], 1)
+
+        self.validate_schema(json_schema)
+
+    def test_decimal_converts_to_float(self):
+        class DecimalSchema(colander.Schema):
+            number = colander.SchemaNode(colander.Decimal())
+
+        schema = DecimalSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['number']
+
+        self.assertEqual(field['type'], 'number')
+        self.assertEqual(field['not']['multipleOf'], 1)
 
         self.validate_schema(json_schema)

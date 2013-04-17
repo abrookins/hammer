@@ -20,6 +20,8 @@ SchemaTypes:
     - colander.Dated
     - colander.DateTime
     - colander.Time
+    - colander.Money
+    - colander.Decimal
 
 Schemas:
 
@@ -31,18 +33,25 @@ Schemas:
 
 Validators:
 
-    - colander.Regex
+    - colander.Regex (also handles colander.url)
     - colander.Email
     - colander.Range
     - colander.Length
+    - colander.OneOf
 
 
 Needs Attention
 ===============
 
-    - colander.Decimal
-    - colander.Money
+Validators:
+
     - colander.All
-    - colander.OneOf
     - colander.ContainsOnly
     - colander.luhnok
+
+SchemaTypes that become "floats" (is this correct?):
+
+    - colander.Money
+    - colander.Decimal
+
+
