@@ -7,7 +7,7 @@ from unittest import TestCase
 
 class Friend(colander.TupleSchema):
     rank = colander.SchemaNode(colander.Int(),
-                              validator=colander.Range(0, 9999))
+                               validator=colander.Range(0, 9999))
     name = colander.SchemaNode(colander.String())
     still_friends = colander.SchemaNode(colander.Boolean())
 
@@ -29,7 +29,7 @@ class UniqueThings(colander.Schema):
 class Person(colander.MappingSchema):
     name = colander.SchemaNode(colander.String())
     age = colander.SchemaNode(colander.Int(),
-                             validator=colander.Range(0, 200))
+                              validator=colander.Range(0, 200))
     friends = Friends()
 
 
