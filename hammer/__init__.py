@@ -335,13 +335,3 @@ def convert_one_of(one_of):
     return {
         'enum': one_of.choices
     }
-
-
-@adapts_validator(colander.url)
-def convert_url(url):
-    """
-    Convert a :class:`colander.url` into a "uri" field.
-    """
-    return {
-        'format': 'uri'
-    }
