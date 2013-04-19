@@ -249,6 +249,10 @@ class TestUrlAdapter(HammerTestCase):
 
 
 class TestFloatAdapter(HammerTestCase):
+    def assert_field_is_float(self, field):
+        self.assertEqual(field['type'], 'number')
+        self.assertEqual(field['not']['multipleOf'], 1)
+
     def test_money_converts_to_float(self):
         class MoneySchema(colander.Schema):
             money = colander.SchemaNode(colander.Money())
@@ -257,9 +261,7 @@ class TestFloatAdapter(HammerTestCase):
         json_schema = hammer.to_json_schema(schema)
         field = json_schema['properties']['money']
 
-        self.assertEqual(field['type'], 'number')
-        self.assertEqual(field['not']['multipleOf'], 1)
-
+        self.assert_field_is_float(field)
         self.validate_schema(json_schema)
 
     def test_decimal_converts_to_float(self):
@@ -270,7 +272,16 @@ class TestFloatAdapter(HammerTestCase):
         json_schema = hammer.to_json_schema(schema)
         field = json_schema['properties']['number']
 
-        self.assertEqual(field['type'], 'number')
-        self.assertEqual(field['not']['multipleOf'], 1)
+        self.assert_field_is_float(field)
+        self.validate_schema(json_schema)
 
+    def test_float_converts_to_float(self):
+        class FloatSchema(colander.Schema):
+            number = colander.SchemaNode(colander.Float())
+
+        schema = FloatSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['number']
+
+        self.assert_field_is_float(field)
         self.validate_schema(json_schema)

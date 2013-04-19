@@ -9,6 +9,7 @@ with :function:`adapts_validator`.
 TODO: Extensible way to mark a custom Schema, SchemaType or validator as
 ignored.
 """
+from functools import wraps
 import colander
 
 
@@ -35,7 +36,6 @@ class Ignore(object):
 _schema_adapters = {
     colander.Int: 'number',
     colander.Integer: 'number',
-    colander.Float: 'number',
     colander.String: 'string',
     colander.Str: 'string',
     colander.Bool: 'boolean',
@@ -43,21 +43,26 @@ _schema_adapters = {
 
 
 _validator_adapters = {
-    colander.Function: Ignore
+    colander.Function: Ignore,
+    colander.All: Ignore,
+    colander.ContainsOnly: Ignore,
+    colander.luhnok: Ignore
 }
 
 
 def adapts_validator(colander_class):
     """
     A decorator that registers the decorated function as a Hammer adapter for
-    a validator.
+    a Colander validator.
 
     ``colander_class`` should be the Colander class that this adapter adapts.
     """
     def wrapper(fn):
+        @wraps(fn)
         def inner_wrapper(*args, **kwargs):
-            return f(*args, **kwargs)
-        _validator_adapters[colander_class] = fn
+            return fn(*args, **kwargs)
+        _validator_adapters[colander_class] = inner_wrapper
+        return inner_wrapper
     return wrapper
 
 
@@ -265,7 +270,7 @@ class FloatAdapter(BaseSchemaAdapter):
 
     .. _Source: https://groups.google.com/d/msg/json-schema/cmnBFW6fJ9I/mjTOYXspAFMJ
     """
-    adapter_for = [colander.Money, colander.Decimal]
+    adapter_for = [colander.Money, colander.Decimal, colander.Float]
 
     def to_json_schema(self):
         return {
