@@ -2,12 +2,15 @@
 """
 hammer.py: Convert Colander schemas into JSON Schema documents.
 
-To extend, register your Schema and SchemaType adapters by creating a subclass
-of :class:`BaseAdapter`. Create a validator adapter by decorating a function
-with :function:`adapts_validator`.
+To extend, register your Schema, SchemaType and validator adapters by decorating
+a callable with :function:`adapts`.
 
-TODO: Extensible way to mark a custom Schema, SchemaType or validator as
-ignored.
+To ignore a type or validator, define a callable that returns :class:`Ignore`
+and decorate it with :function:`adapts`. E.g.:
+
+    @adapts(colander.Length)
+    def ignore_length(*args, **kwargs):
+        return Ignore
 """
 from collections import defaultdict
 from functools import wraps
@@ -19,6 +22,43 @@ SUPPORTED_JSON_DRAFT_VERSIONS = (3, 4)
 
 
 _adapters = defaultdict(dict)
+
+
+def make_iterable(obj, iter_type):
+    """
+    Wrap ``obj`` in an iterable identified by ``iter_type``.
+
+    ``iter_type`` may be tuple, list or set.
+    """
+    try:
+        len(obj)
+    except TypeError:
+        if iter_type is tuple:
+            obj = obj,
+        elif iter_type is list:
+            obj = [obj]
+        elif iter_type is set:
+            obj = {obj}
+        else:
+            raise ValueError('iter_cls must be tuple, list or set')
+    return obj
+
+
+make_tuple = functools.partial(make_iterable, iter_type=tuple)
+
+
+def register_adapter(adaptees, adapter, draft_version=None):
+    """
+    Register the callable ``adapter`` as an adapter for the Colander entity
+    ``adaptee`` for JSON Schema draft version ``draft_version``.
+    """
+    draft_version = draft_version or SUPPORTED_JSON_DRAFT_VERSIONS
+    draft_version = make_tuple(draft_version)
+    adaptees = make_tuple(adaptees)
+
+    for version in draft_version:
+        for adaptee in adaptees:
+            _adapters[version][adaptee] = adapter
 
 
 def adapts(*adaptees, **kwargs):
@@ -35,22 +75,14 @@ def adapts(*adaptees, **kwargs):
     not provided, this value defaults to all supported drafts via
     `SUPPORTED_JSON_DRAFT_VERSIONS`.
     """
-    draft_version = kwargs.get('draft_version', SUPPORTED_JSON_DRAFT_VERSIONS)
-
-    # Ensure that ``draft_version`` is iterable.
-    try:
-        len(draft_version)
-    except TypeError:
-        draft_version = (draft_version,)
+    draft_version = kwargs.get('draft_version')
 
     def wrapper(fn):
         @wraps(fn)
         def inner_wrapper(*args, **kwargs):
             return fn(*args, **kwargs)
 
-        for version in draft_version:
-            for key in adaptees:
-                _adapters[version][key] = inner_wrapper
+        register_adapter(adaptees, inner_wrapper, draft_version)
 
         return inner_wrapper
     return wrapper
@@ -69,8 +101,6 @@ class Invalid(Exception):
         return self.__str__()
 
 
-@adapts(colander.Function, colander.All, colander.ContainsOnly,
-        colander.luhnok)
 class Ignore(object):
     """
     A Colander adaptee that should be ignored.
@@ -150,7 +180,12 @@ def build_json_validators(node, draft_version):
         if not validator_adapter:
             continue
 
-        validator_adapters.update(validator_adapter(validator))
+        json_validator = validator_adapter(validator)
+
+        if json_validator is Ignore:
+            continue
+
+        validator_adapters.update(json_validator)
 
     return validator_adapters
 
@@ -162,13 +197,14 @@ def build_json_property(node, draft_version):
     """
     adapter = get_schema_adapter(node, draft_version)
 
-    if adapter is Ignore:
-        return adapter
-
     if adapter is None:
         raise Invalid(node)
 
     json_property = adapter(node)
+
+    if json_property is Ignore:
+        return Ignore
+
     validators = build_json_validators(node, draft_version)
 
     if validators:
@@ -207,7 +243,12 @@ def adapt_mapping(schema, draft_version):
     required_property_names = []
 
     for node in schema.children:
-        properties[node.name] = build_json_property(node, draft_version)
+        json_property = build_json_property(node, draft_version)
+
+        if json_property is Ignore:
+            continue
+
+        properties[node.name] = json_property
 
         if node.required:
             required_property_names.append(node.name)
@@ -230,8 +271,14 @@ def adapt_sequence(schema, draft_version):
 
     json_property = {
         'type': 'array',
-        'items': build_json_property(sequence_node, draft_version)
     }
+
+    # The "items" field is a JSON schema that items of the sequence will be
+    # validated against.
+    items = build_json_property(sequence_node, draft_version)
+
+    if items is not Ignore:
+        json_property['items'] = items
 
     if sequence_node.required:
         json_property['required'] = [sequence_node.name]
@@ -260,7 +307,12 @@ def adapt_tuple(schema, draft_version):
     required_property_names = []
 
     for node in schema.children:
-        properties.append(build_json_property(node, draft_version))
+        json_property = build_json_property(node, draft_version)
+
+        if json_property is Ignore:
+            continue
+
+        properties.append(json_property)
 
         if node.required:
             required_property_names.append(node.name)
@@ -305,7 +357,7 @@ def adapt_float(schema, draft_version):
 
 
 @adapts(colander.Regex)
-def convert_regex(regex, draft_version):
+def adapt_regex(regex, draft_version):
     """
     Convert a :class:`colander.Regex` into a "pattern" validator.
     """
@@ -315,7 +367,7 @@ def convert_regex(regex, draft_version):
 
 
 @adapts(colander.Email)
-def convert_email(email, draft_version):
+def adapt_email(email, draft_version):
     """
     Convert a :class:`colander.Email` into an "email" validator.
     """
@@ -325,7 +377,7 @@ def convert_email(email, draft_version):
 
 
 @adapts(colander.Range)
-def convert_range(_range, draft_version):
+def adapt_range(_range, draft_version):
     """
     Convert a :class:`colander.Range` into "min" and "max" fields.
     """
@@ -351,10 +403,16 @@ def convert_length(length, draft_version):
 
 
 @adapts(colander.OneOf)
-def convert_one_of(one_of, draft_version):
+def adapt_one_of(one_of, draft_version):
     """
     Convert a :class:`colander.OneOf` into an "enum" field.
     """
     return {
         'enum': one_of.choices
     }
+
+
+# Ignored validators
+@adapts(colander.Function, colander.All, colander.ContainsOnly, colander.luhnok)
+def ignore(*args, **kwargs):
+    return Ignore

@@ -283,3 +283,42 @@ class TestFloatAdapter(HammerTestCase):
 
         self.assert_field_is_float(field)
         self.validate_schema(json_schema)
+
+
+class TestIgnored(HammerTestCase):
+    def test_ignored_schema_does_not_appear_in_json_schema(self):
+        class IgnoredString(colander.String):
+            pass
+
+        @hammer.adapts(IgnoredString)
+        def ignore(*args, **kwargs):
+            return hammer.Ignore
+
+        class IgnoringSchema(colander.Schema):
+            ignored_node = colander.SchemaNode(IgnoredString())
+            other_node = colander.SchemaNode(colander.String())
+
+        schema = IgnoringSchema()
+        json_schema = hammer.to_json_schema(schema)
+        # ignored_node should not be in 'properties' or 'required'
+        self.assertNotIn('ignored_node', json_schema['properties'])
+        self.assertEqual(json_schema['required'], ['other_node'])
+
+    def test_ignored_validator_skips_an_otherwise_translatable_validator(self):
+        @hammer.adapts(colander.Length)
+        def ignore(*args, **kwargs):
+            return hammer.Ignore
+
+        class IgnoringSchema(colander.Schema):
+            thing = colander.SchemaNode(colander.String(),
+                                        validator=colander.Length(min=1, max=5))
+
+        schema = IgnoringSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['thing']
+        self.assertNotIn('minLength', field)
+        self.assertNotIn('maxLength', field)
+
+        # Stop ignoring colander.Length
+        hammer.register_adapter(colander.Length, hammer.convert_length,
+                                hammer.SUPPORTED_JSON_DRAFT_VERSIONS)
