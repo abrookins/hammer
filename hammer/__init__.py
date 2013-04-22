@@ -21,9 +21,6 @@ import colander
 SUPPORTED_JSON_DRAFT_VERSIONS = (3, 4)
 
 
-_adapters = defaultdict(dict)
-
-
 def make_iterable(obj, iter_type):
     """
     Wrap ``obj`` in an iterable identified by ``iter_type``.
@@ -45,6 +42,9 @@ def make_iterable(obj, iter_type):
 
 
 make_tuple = functools.partial(make_iterable, iter_type=tuple)
+
+
+_adapters = defaultdict(dict)
 
 
 def register_adapter(adaptees, adapter, draft_version=None):
