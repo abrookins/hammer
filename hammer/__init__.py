@@ -9,8 +9,51 @@ with :function:`adapts_validator`.
 TODO: Extensible way to mark a custom Schema, SchemaType or validator as
 ignored.
 """
+from collections import defaultdict
 from functools import wraps
+import functools
 import colander
+
+
+SUPPORTED_JSON_DRAFT_VERSIONS = (3, 4)
+
+
+_adapters = defaultdict(dict)
+
+
+def adapts(*adaptees, **kwargs):
+    """
+    A decorator that registers the decorated function as a Hammer adapter for
+    a Colander entity.
+
+    ``adaptees`` should be the Colander entity or entities that this adapter
+    adapts. This might be a Schema, SchemaType or validator or an iterable of
+    such.
+
+    ``draft_version`` may be an integer specifying the JSON Schema draft
+    version for which the adapter applies, or an iterable of version numbers. If
+    not provided, this value defaults to all supported drafts via
+    `SUPPORTED_JSON_DRAFT_VERSIONS`.
+    """
+    draft_version = kwargs.get('draft_version', SUPPORTED_JSON_DRAFT_VERSIONS)
+
+    # Ensure that ``draft_version`` is iterable.
+    try:
+        len(draft_version)
+    except TypeError:
+        draft_version = (draft_version,)
+
+    def wrapper(fn):
+        @wraps(fn)
+        def inner_wrapper(*args, **kwargs):
+            return fn(*args, **kwargs)
+
+        for version in draft_version:
+            for key in adaptees:
+                _adapters[version][key] = inner_wrapper
+
+        return inner_wrapper
+    return wrapper
 
 
 class Invalid(Exception):
@@ -26,242 +69,225 @@ class Invalid(Exception):
         return self.__str__()
 
 
+@adapts(colander.Function, colander.All, colander.ContainsOnly,
+        colander.luhnok)
 class Ignore(object):
     """
-    A Colander type or validator that should be ignored.
+    A Colander adaptee that should be ignored.
     """
     pass
 
 
-_schema_adapters = {
-    colander.Int: 'number',
-    colander.Integer: 'number',
-    colander.String: 'string',
-    colander.Str: 'string',
-    colander.Bool: 'boolean',
-}
-
-
-_validator_adapters = {
-    colander.Function: Ignore,
-    colander.All: Ignore,
-    colander.ContainsOnly: Ignore,
-    colander.luhnok: Ignore
-}
-
-
-def adapts_validator(colander_class):
+def get_schema_adapter(node, draft_version):
     """
-    A decorator that registers the decorated function as a Hammer adapter for
-    a Colander validator.
-
-    ``colander_class`` should be the Colander class that this adapter adapts.
-    """
-    def wrapper(fn):
-        @wraps(fn)
-        def inner_wrapper(*args, **kwargs):
-            return fn(*args, **kwargs)
-        _validator_adapters[colander_class] = inner_wrapper
-        return inner_wrapper
-    return wrapper
-
-
-def get_adapter(node):
-    """
-    Return an adapter class for ``node``. Return None if one was not
-    found.
+    Return an adapter function for the Colander Schema or SchemaType ``node``
+    if one exists, else None.
 
     Checks for an adapter registered for the node's ``schema_type``
     field first, then the __class__ of its ``typ`` field.
     """
-    adapter = _schema_adapters.get(node.schema_type, None)
+    adapters = _adapters.get(draft_version, None)
+
+    if adapters is None:
+        return
+
+    adapter = adapters.get(node.schema_type, None)
 
     if adapter is None:
-        adapter = _schema_adapters.get(node.typ.__class__, None)
+        adapter = adapters.get(node.typ.__class__, None)
 
     if adapter is None:
-        print _schema_adapters.keys()
         raise Invalid(node)
 
-    return adapter
+    return functools.partial(adapter, draft_version=draft_version)
 
 
-def to_json_schema(schema):
+def get_validator_adapter(validator, draft_version):
+    """
+    Return an adapter function for the Colander validator class ``validator``
+    if one exists, else None.
+    """
+    adapters = _adapters.get(draft_version, None)
+
+    if adapters is None:
+        return
+
+    adapter = adapters.get(validator.__class__, None)
+
+    if adapter is None:
+        return
+
+    return functools.partial(adapter, draft_version=draft_version)
+
+
+def to_json_schema(schema, draft_version=4):
     """
     Return a JSON schema document for the Colander schema *instance* ``schema``.
     """
-    adapter_class = get_adapter(schema)
-    adapter = adapter_class(schema)
-    return adapter.to_json_schema()
+    if draft_version not in SUPPORTED_JSON_DRAFT_VERSIONS:
+        raise ValueError(
+            'The following JSON Schema draft versions are supported: '
+            '%s' % ', '.join(SUPPORTED_JSON_DRAFT_VERSIONS))
+
+    adapter = get_schema_adapter(schema, draft_version)
+    return adapter(schema)
 
 
-class SchemaAdapterMetaclass(type):
+def build_json_validators(node, draft_version):
     """
-    A metaclass used by BaseAdapter that registers the class as a Hammer
-    adapter if it defines an ``adapter_for`` class variable.
-
-    The adapter class will be become available as an adapter for the
-    ``adapter_for`` class.
+    Find any validator adapters for the Colander Schema or SchemaType ``node``
+    and return a dict that contains the fields all of the adapters generated.
     """
-    def __new__(mcs, name, bases, dct):
-        adapter_for = dct.get('adapter_for', None)
-        cls = super(SchemaAdapterMetaclass, mcs).__new__(mcs, name, bases, dct)
+    validators = []
+    validator_adapters = {}
 
-        if adapter_for:
-            try:
-                for target in adapter_for:
-                    _schema_adapters[target] = cls
-            except TypeError:
-                _schema_adapters[adapter_for] = cls
+    if hasattr(node.validator, '__call__'):
+        validators.append(node.validator)
 
-        return cls
+    for validator in validators:
+        validator_adapter = get_validator_adapter(validator, draft_version)
+
+        if not validator_adapter:
+            continue
+
+        validator_adapters.update(validator_adapter(validator))
+
+    return validator_adapters
 
 
-class BaseSchemaAdapter(object):
+def build_json_property(node, draft_version):
     """
-    Base class for JSON schema adapters.
+    Build a JSON property for ``node``, a :class:`colander.SchemaNode`
+    object.
     """
-    __metaclass__ = SchemaAdapterMetaclass
+    adapter = get_schema_adapter(node, draft_version)
 
-    def __init__(self, schema, *args, **kwargs):
-        self.schema = schema
-        super(BaseSchemaAdapter, self).__init__(*args, **kwargs)
+    if adapter is Ignore:
+        return adapter
 
-    def to_json_schema(self):
-        raise NotImplementedError
+    if adapter is None:
+        raise Invalid(node)
 
-    def build_validator_adapters(self, node):
-        validators = []
-        validator_adapters = {}
+    json_property = adapter(node)
+    validators = build_json_validators(node, draft_version)
 
-        if hasattr(node.validator, '__call__'):
-            validators.append(node.validator)
+    if validators:
+        json_property.update(validators)
 
-        for validator in validators:
-            validator_adapter = _validator_adapters.get(validator.__class__, None)
-
-            if not validator_adapter:
-                continue
-
-            validator_adapters.update(validator_adapter(validator))
-
-        return validator_adapters
-
-    def build_json_property(self, node):
-        """
-        Build a JSON property for ``node``, a :class:`colander.SchemaNode`
-        object.
-        """
-        adapter = get_adapter(node)
-
-        if adapter is Ignore:
-            return adapter
-
-        if adapter is None:
-            raise Invalid(node)
-
-        try:
-            json_property = adapter(node).to_json_schema()
-        except (TypeError, AttributeError):
-            # Fall-through - if no adapter class was found, just return the
-            # JSON type string (e.g., "number".
-            json_property = {
-                'type': adapter,
-            }
-            # XXX: Is this how the required field works -- require an array
-            # that includes the type of the field?
-            if node.required:
-                json_property['required'] = [adapter]
-
-        validators = self.build_validator_adapters(node)
-
-        if validators:
-            json_property.update(validators)
-
-        return json_property
+    return json_property
 
 
-class MappingAdapter(BaseSchemaAdapter):
+@adapts(colander.Int, colander.Integer)
+def adapt_int(schema, draft_version):
+    return {
+        'type': 'number'
+    }
+
+
+@adapts(colander.String, colander.Str)
+def string_adapter(schema, draft_version):
+    return {
+        'type': 'string'
+    }
+
+
+@adapts(colander.Bool)
+def bool_adapter(schema, draft_version):
+    return {
+        'type': 'boolean'
+    }
+
+
+@adapts(colander.Schema, colander.MappingSchema, colander.Mapping)
+def adapt_mapping(schema, draft_version):
     """
     Convert a :class:`colander.MappingSchema` into a JSON object property.
     """
-    adapter_for = [colander.Schema, colander.MappingSchema, colander.Mapping]
+    properties = {}
+    required_property_names = []
 
-    def to_json_schema(self):
-        json_property = {
-            'type': 'object',
-            'properties': {}
-        }
+    for node in schema.children:
+        properties[node.name] = build_json_property(node, draft_version)
 
-        for node in self.schema.children:
-            json_property['properties'][node.name] = self.build_json_property(
-                node)
+        if node.required:
+            required_property_names.append(node.name)
 
-        return json_property
+    return {
+        'type': 'object',
+        'properties': properties,
+        'required': required_property_names
+    }
 
 
-class SequenceAdapter(BaseSchemaAdapter):
+@adapts(colander.Sequence)
+def adapt_sequence(schema, draft_version):
     """
     Convert a :class:`colander.Sequence` into a JSON array property.
     """
-    adapter_for = colander.Sequence
+    # The first node contains the sequence (tuple, etc.) schema type. It
+    # contains the schema of the object repeated in the sequence of items.
+    sequence_node = schema.children[0]
 
-    def to_json_schema(self):
-        return {
-            'type': 'array',
-            'items': self.build_json_property(self.schema.children[0])
-        }
+    json_property = {
+        'type': 'array',
+        'items': build_json_property(sequence_node, draft_version)
+    }
+
+    if sequence_node.required:
+        json_property['required'] = [sequence_node.name]
+
+    return json_property
 
 
-class SetAdapter(BaseSchemaAdapter):
+@adapts(colander.Set)
+def adapt_set(schema, draft_version):
     """
     Convert a :class:`colander.Set` into a JSON array property of unique items.
     """
-    adapter_for = colander.Set
-
-    def to_json_schema(self):
-        return {
-            'type': 'array',
-            'uniqueItems': True
-        }
+    return {
+        'type': 'array',
+        'uniqueItems': True
+    }
 
 
-class TupleAdapter(BaseSchemaAdapter):
+@adapts(colander.Tuple)
+def adapt_tuple(schema, draft_version):
     """
     Convert a :class:`colander.Tuple` into a fixed-length JSON array property.
     """
-    adapter_for = colander.Tuple
+    length = len(schema.children)
+    properties = []
+    required_property_names = []
 
-    def to_json_schema(self):
-        length = len(self.schema.children)
-        json_property = {
-            'type': 'array',
-            'items': [],
-            'minItems': length,
-            'maxItems': length
-        }
+    for node in schema.children:
+        properties.append(build_json_property(node, draft_version))
 
-        for node in self.schema.children:
-            json_property['items'].append(self.build_json_property(node))
+        if node.required:
+            required_property_names.append(node.name)
 
-        return json_property
+    return {
+        'type': 'array',
+        'minItems': length,
+        'maxItems': length,
+        'required': required_property_names,
+        'items': properties
+    }
 
 
-class DatetimeAdapter(BaseSchemaAdapter):
+@adapts(colander.DateTime, colander.Date, colander.Time)
+def adapt_datetime(schema, draft_version):
     """
     Convert various Colander datetime types into a "string" type with a
     "datetime" format string.
     """
-    adapter_for = [colander.DateTime, colander.Date, colander.Time]
-
-    def to_json_schema(self):
-        return {
-            'type': 'string',
-            'format': 'date-time'
-        }
+    return {
+        'type': 'string',
+        'format': 'date-time'
+    }
 
 
-class FloatAdapter(BaseSchemaAdapter):
+@adapts(colander.Money, colander.Decimal, colander.Float)
+def adapt_float(schema, draft_version):
     """
     Convert a numeric SchemaType into a "float."
 
@@ -270,19 +296,16 @@ class FloatAdapter(BaseSchemaAdapter):
 
     .. _Source: https://groups.google.com/d/msg/json-schema/cmnBFW6fJ9I/mjTOYXspAFMJ
     """
-    adapter_for = [colander.Money, colander.Decimal, colander.Float]
-
-    def to_json_schema(self):
-        return {
-            'type': 'number',
-            'not': {
-                'multipleOf': 1
-            }
+    return {
+        'type': 'number',
+        'not': {
+            'multipleOf': 1
         }
+    }
 
 
-@adapts_validator(colander.Regex)
-def convert_regex(regex):
+@adapts(colander.Regex)
+def convert_regex(regex, draft_version):
     """
     Convert a :class:`colander.Regex` into a "pattern" validator.
     """
@@ -291,8 +314,8 @@ def convert_regex(regex):
     }
 
 
-@adapts_validator(colander.Email)
-def convert_email(email):
+@adapts(colander.Email)
+def convert_email(email, draft_version):
     """
     Convert a :class:`colander.Email` into an "email" validator.
     """
@@ -301,8 +324,8 @@ def convert_email(email):
     }
 
 
-@adapts_validator(colander.Range)
-def convert_range(_range):
+@adapts(colander.Range)
+def convert_range(_range, draft_version):
     """
     Convert a :class:`colander.Range` into "min" and "max" fields.
     """
@@ -316,8 +339,8 @@ def convert_range(_range):
     return fields
 
 
-@adapts_validator(colander.Length)
-def convert_length(length):
+@adapts(colander.Length)
+def convert_length(length, draft_version):
     """
     Convert a :class:`colander.Range` into "min" and "max" fields.
     """
@@ -327,8 +350,8 @@ def convert_length(length):
     }
 
 
-@adapts_validator(colander.OneOf)
-def convert_one_of(one_of):
+@adapts(colander.OneOf)
+def convert_one_of(one_of, draft_version):
     """
     Convert a :class:`colander.OneOf` into an "enum" field.
     """

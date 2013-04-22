@@ -41,24 +41,23 @@ class HammerTestCase(TestCase):
 class TestTupleSchemaAdapter(HammerTestCase):
     def test_converts_tuple_to_fixed_length_array(self):
         schema = Friend()
-        json_schema = hammer.TupleAdapter(schema).to_json_schema()
+        json_schema = hammer.adapt_tuple(schema, 4)
         self.assertEqual(len(json_schema['items']), 3)
         self.assertEqual(json_schema['maxItems'], 3)
         self.assertEqual(json_schema['minItems'], 3)
         self.assertEqual(json_schema['type'], 'array')
+        self.assertEqual(json_schema['required'],
+                         ['rank', 'name', 'still_friends'])
         self.assertEqual(json_schema['items'][0]['type'], 'number')
-        self.assertEqual(json_schema['items'][0]['required'], ['number'])
         self.assertEqual(json_schema['items'][1]['type'], 'string')
-        self.assertEqual(json_schema['items'][1]['required'], ['string'])
         self.assertEqual(json_schema['items'][2]['type'], 'boolean')
-        self.assertEqual(json_schema['items'][2]['required'], ['boolean'])
         self.validate_schema(json_schema)
 
 
 class TestSequenceAdapter(HammerTestCase):
     def test_converts_sequence_to_array(self):
         schema = Friends()
-        json_schema = hammer.SequenceAdapter(schema).to_json_schema()
+        json_schema = hammer.adapt_sequence(schema, 4)
         self.assertEqual(json_schema['type'], 'array')
 
         items = json_schema['items']
@@ -72,7 +71,7 @@ class TestSequenceAdapter(HammerTestCase):
 class TestSequenceAdapter(HammerTestCase):
     def test_converts_sequence_to_array(self):
         schema = Friends()
-        json_schema = hammer.SequenceAdapter(schema).to_json_schema()
+        json_schema = hammer.adapt_sequence(schema, 4)
         self.assertEqual(json_schema['type'], 'array')
 
         items = json_schema['items']
@@ -86,22 +85,21 @@ class TestSequenceAdapter(HammerTestCase):
 class TestMappingAdapter(HammerTestCase):
     def test_converts_mapping_to_json_object(self):
         schema = Phone()
-        json_schema = hammer.MappingAdapter(schema).to_json_schema()
+        json_schema = hammer.adapt_mapping(schema, 4)
         self.assertEqual(json_schema['type'], 'object')
         self.assertEqual(len(json_schema['properties'].values()), 2)
 
         properties = json_schema['properties']
         self.assertEqual(properties['location']['type'], 'string')
-        self.assertEqual(properties['location']['required'], ['string'])
+        self.assertEqual(properties['location']['enum'], ['home', 'work'])
         self.assertEqual(properties['number']['type'], 'string')
-        self.assertEqual(properties['number']['required'], ['string'])
         self.validate_schema(json_schema)
 
 
 class TestSetAdapter(HammerTestCase):
     def test_converts_set_to_unique_items_array(self):
         schema = UniqueThings()
-        json_schema = hammer.SetAdapter(schema).to_json_schema()
+        json_schema = hammer.adapt_set(schema, 4)
         self.assertEqual(json_schema['uniqueItems'], True)
         self.assertEqual(json_schema['type'], 'array')
         self.validate_schema(json_schema)
