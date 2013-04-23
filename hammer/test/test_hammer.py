@@ -41,7 +41,7 @@ class HammerTestCase(TestCase):
 class TestTupleSchemaAdapter(HammerTestCase):
     def test_converts_tuple_to_fixed_length_array(self):
         schema = Friend()
-        json_schema = hammer.adapt_tuple(schema, 4)
+        json_schema = hammer.to_json_schema(schema)
         self.assertEqual(len(json_schema['items']), 3)
         self.assertEqual(json_schema['maxItems'], 3)
         self.assertEqual(json_schema['minItems'], 3)
@@ -57,7 +57,7 @@ class TestTupleSchemaAdapter(HammerTestCase):
 class TestSequenceAdapter(HammerTestCase):
     def test_converts_sequence_to_array(self):
         schema = Friends()
-        json_schema = hammer.adapt_sequence(schema, 4)
+        json_schema = hammer.to_json_schema(schema)
         self.assertEqual(json_schema['type'], 'array')
 
         items = json_schema['items']
@@ -71,7 +71,7 @@ class TestSequenceAdapter(HammerTestCase):
 class TestSequenceAdapter(HammerTestCase):
     def test_converts_sequence_to_array(self):
         schema = Friends()
-        json_schema = hammer.adapt_sequence(schema, 4)
+        json_schema = hammer.to_json_schema(schema)
         self.assertEqual(json_schema['type'], 'array')
 
         items = json_schema['items']
@@ -85,7 +85,7 @@ class TestSequenceAdapter(HammerTestCase):
 class TestMappingAdapter(HammerTestCase):
     def test_converts_mapping_to_json_object(self):
         schema = Phone()
-        json_schema = hammer.adapt_mapping(schema, 4)
+        json_schema = hammer.to_json_schema(schema)
         self.assertEqual(json_schema['type'], 'object')
         self.assertEqual(len(json_schema['properties'].values()), 2)
 
@@ -99,9 +99,10 @@ class TestMappingAdapter(HammerTestCase):
 class TestSetAdapter(HammerTestCase):
     def test_converts_set_to_unique_items_array(self):
         schema = UniqueThings()
-        json_schema = hammer.adapt_set(schema, 4)
-        self.assertEqual(json_schema['uniqueItems'], True)
-        self.assertEqual(json_schema['type'], 'array')
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['things']
+        self.assertEqual(field['uniqueItems'], True)
+        self.assertEqual(field['type'], 'array')
         self.validate_schema(json_schema)
 
 
@@ -285,6 +286,29 @@ class TestFloatAdapter(HammerTestCase):
         self.validate_schema(json_schema)
 
 
+class TestFunctionValidatorAdapter(HammerTestCase):
+    def test_validator_adapter_works_if_target_validator_is_a_function(self):
+        def positive(*args, **kwargs):
+            return True
+
+        @hammer.adapts(positive)
+        def adapt_positive(node, **kwargs):
+            return {
+                'minimum': 0
+            }
+
+        class PositiveDecimalSchema(colander.Schema):
+            number = colander.SchemaNode(colander.Decimal(),
+                                         validator=positive)
+
+        schema = PositiveDecimalSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['number']
+        self.assertEqual(field['minimum'], 0)
+
+        self.validate_schema(json_schema)
+
+
 class TestIgnored(HammerTestCase):
     def test_ignored_schema_does_not_appear_in_json_schema(self):
         class IgnoredString(colander.String):
@@ -304,6 +328,8 @@ class TestIgnored(HammerTestCase):
         self.assertNotIn('ignored_node', json_schema['properties'])
         self.assertEqual(json_schema['required'], ['other_node'])
 
+        self.validate_schema(json_schema)
+
     def test_ignored_validator_skips_an_otherwise_translatable_validator(self):
         @hammer.adapts(colander.Length)
         def ignore(*args, **kwargs):
@@ -319,6 +345,22 @@ class TestIgnored(HammerTestCase):
         self.assertNotIn('minLength', field)
         self.assertNotIn('maxLength', field)
 
+        self.validate_schema(json_schema)
+
         # Stop ignoring colander.Length
         hammer.register_adapter(colander.Length, hammer.convert_length,
                                 hammer.SUPPORTED_JSON_DRAFT_VERSIONS)
+
+
+class TestIncludeTypes(HammerTestCase):
+    def test_when_include_types_is_false_type_should_not_exist_in_node(self):
+        class SomeSchema(colander.Schema):
+            thing = colander.SchemaNode(colander.String())
+
+        schema = SomeSchema()
+        json_schema = hammer.to_json_schema(schema, include_types=False)
+        field = json_schema['properties']['thing']
+        self.assertNotIn('type', field)
+
+        self.validate_schema(json_schema)
+
