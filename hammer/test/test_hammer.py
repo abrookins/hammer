@@ -176,8 +176,8 @@ class TestRangeAdapter(HammerTestCase):
         field = json_schema['properties']['constrained_number']
 
         self.assertEqual(field['type'], 'number')
-        self.assertEqual(field['min'], 1)
-        self.assertEqual(field['max'], 5)
+        self.assertEqual(field['minimum'], 1)
+        self.assertEqual(field['maximum'], 5)
 
         self.validate_schema(json_schema)
 
@@ -191,9 +191,9 @@ class TestRangeAdapter(HammerTestCase):
         field = json_schema['properties']['constrained_number']
 
         self.assertEqual(field['type'], 'number')
-        self.assertEqual(field['min'], 1)
+        self.assertEqual(field['minimum'], 1)
 
-        self.assertTrue('max' not in field)
+        self.assertTrue('maximum' not in field)
         self.validate_schema(json_schema)
 
 

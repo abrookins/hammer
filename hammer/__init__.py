@@ -67,8 +67,7 @@ def adapts(*adaptees, **kwargs):
     a Colander entity.
 
     ``adaptees`` should be the Colander entity or entities that this adapter
-    adapts. This might be a Schema, SchemaType or validator or an iterable of
-    such.
+    adapts. This might be a Schema, SchemaType or validator.
 
     ``draft_version`` may be an integer specifying the JSON Schema draft
     version for which the adapter applies, or an iterable of version numbers. If
@@ -115,9 +114,12 @@ def get_schema_adapter(node, **kwargs):
 
     Checks for an adapter registered for the node's ``schema_type``
     field first, then the __class__ of its ``typ`` field.
+
+    Keyword arguments:
+        ``draft_version`` is the JSON Schema draft version the adapter should
+            target
     """
     draft_version = kwargs['draft_version']
-    include_types = kwargs['include_types']
     adapters = _adapters.get(draft_version, None)
 
     if adapters is None:
@@ -131,15 +133,19 @@ def get_schema_adapter(node, **kwargs):
     if adapter is None:
         raise Invalid(node)
 
-    return functools.partial(adapter, draft_version=draft_version,
-                             include_types=include_types)
+    return functools.partial(adapter, **kwargs)
 
 
-def get_validator_adapter(validator, draft_version, include_types):
+def get_validator_adapter(validator, **kwargs):
     """
     Return an adapter function for the Colander validator class ``validator``
     if one exists, else None.
+
+    Keyword arguments:
+        ``draft_version`` is the JSON Schema draft version the adapter should
+            target
     """
+    draft_version = kwargs['draft_version']
     adapters = _adapters.get(draft_version, None)
 
     if adapters is None:
@@ -153,8 +159,7 @@ def get_validator_adapter(validator, draft_version, include_types):
     if adapter is None:
         return
 
-    return functools.partial(adapter, draft_version=draft_version,
-                             include_types=include_types)
+    return functools.partial(adapter, **kwargs)
 
 
 def to_json_schema(schema, draft_version=4, include_types=True):
@@ -171,7 +176,7 @@ def to_json_schema(schema, draft_version=4, include_types=True):
     return adapter(schema)
 
 
-def build_json_validators(node, draft_version, include_types):
+def build_json_validators(node, **kwargs):
     """
     Find any validator adapters for the Colander Schema or SchemaType ``node``
     and return a dict that contains the fields all of the adapters generated.
@@ -183,8 +188,7 @@ def build_json_validators(node, draft_version, include_types):
         validators.append(node.validator)
 
     for validator in validators:
-        validator_adapter = get_validator_adapter(validator, draft_version,
-                                                  include_types)
+        validator_adapter = get_validator_adapter(validator, **kwargs)
 
         if not validator_adapter:
             continue
@@ -203,6 +207,11 @@ def build_json_property(node, **kwargs):
     """
     Build a JSON property for ``node``, a :class:`colander.SchemaNode`
     object.
+
+    Keyword arguments:
+        ``draft_version`` is the JSON Schema draft version to target
+        ``include_types`` is a boolean signifying whether or not the JSON
+            property should include type information
     """
     adapter = get_schema_adapter(node, **kwargs)
     draft_version = kwargs['draft_version']
