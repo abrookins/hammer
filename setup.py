@@ -8,7 +8,7 @@ README = open(os.path.join(here, 'README.txt')).read()
 requires = ['colander']
 
 setup(name='hammer',
-      version='0.0',
+      version='0.1.0',
       description='hammer',
       long_description=README,
       classifiers=[
