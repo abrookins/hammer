@@ -247,14 +247,15 @@ def adapt_int(schema, **kwargs):
 
 
 @adapts(colander.String, colander.Str)
-def string_adapter(schema, **kwargs):
+def adapt_string(schema, **kwargs):
     return {
-        'type': 'string'
+        'type': 'string',
+        'format': 'alphanumeric'
     }
 
 
 @adapts(colander.Bool)
-def bool_adapter(schema, **kwargs):
+def adapt_bool(schema, **kwargs):
     return {
         'type': 'boolean'
     }
