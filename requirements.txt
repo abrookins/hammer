@@ -1,2 +1,2 @@
-colander==1.0a2
+colander==1.0a5
 jsonschema==1.1.0

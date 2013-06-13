@@ -364,3 +364,15 @@ class TestIncludeTypes(HammerTestCase):
 
         self.validate_schema(json_schema)
 
+class TestDropConvertsToOptional(HammerTestCase):
+    def test_when_missing_is_drop_optional_should_be_true(self):
+        class DropSchema(colander.Schema):
+            thing = colander.SchemaNode(colander.String(),
+                                        missing=colander.drop)
+
+        schema = DropSchema()
+        json_schema = hammer.to_json_schema(schema)
+        field = json_schema['properties']['thing']
+        self.assertTrue(field['optional'])
+
+        self.validate_schema(json_schema)

@@ -228,6 +228,9 @@ def build_json_property(node, **kwargs):
     if node.required and draft_version == 3:
         json_property['required'] = True
 
+    if node.missing is colander.drop:
+        json_property['optional'] = True
+
     if include_types is False:
         del json_property['type']
 
@@ -457,6 +460,7 @@ def adapt_one_of(one_of, **kwargs):
     return {
         'enum': one_of.choices
     }
+
 
 
 # Ignored validators
